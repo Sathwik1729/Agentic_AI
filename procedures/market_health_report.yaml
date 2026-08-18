@@ -1,0 +1,72 @@
+name: market_health_report
+description: >
+  Correlate a market's SCS_PERCENT from the aggregated metrics (CSV2) with
+  its pipeline-level file rejection rates from roster processing details (CSV1)
+  for the same state. Identifies whether file-level quality issues are impacting
+  market-level business outcomes.
+version: 1
+parameters:
+  state:
+    description: "State/market to analyze (e.g., 'CA', 'NY', 'TX')"
+    required: true
+    default: null
+  month:
+    description: "Optional month filter (e.g., '01-2026')"
+    required: false
+    default: null
+steps:
+  - action: query_market
+    description: "Get market-level SCS_PERCENT and transaction volumes for the state"
+    tool: query_market_data
+    params:
+      market: "${state}"
+      month: "${month}"
+  - action: cross_correlate
+    description: "Join file-level quality metrics with market-level success rates"
+    tool: correlate_file_and_market_data
+    params:
+      state: "${state}"
+  - action: analyze_quality
+    description: "Get record quality breakdown for files in this state"
+    tool: analyze_record_quality
+    params:
+      state: "${state}"
+  - action: interpret
+    description: "Analyze the gap between file-level and market-level metrics"
+    logic: |
+      quality_gap = market_scs_percent - avg_file_scs_pct
+      If quality_gap > 5 → "Market is performing better than individual files suggest — retries recovering well"
+      If quality_gap < -5 → "Market is underperforming — file-level issues are dragging down the market"
+      If abs(quality_gap) <= 5 → "Market performance aligns with file-level quality"
+  - action: check_threshold
+    description: "Compare market SCS_PERCENT against the 95% industry benchmark"
+    rules:
+      - condition: "SCS_PERCENT >= 95"
+        status: "✅ Above benchmark"
+      - condition: "SCS_PERCENT >= 90"
+        status: "⚠️ Below benchmark — needs attention"
+      - condition: "SCS_PERCENT < 90"
+        status: "🔴 Critical — may trigger CMS audit"
+  - action: output
+    description: "Structured market health report with recommendations"
+    format: |
+      ## Market Health Report: ${state}
+      
+      ### Market Metrics (CSV2)
+      - SCS_PERCENT: ${scs_percent}%
+      - Benchmark Status: ${benchmark_status}
+      - Total Transactions: ${total_transactions}
+      
+      ### File-Level Quality (CSV1)
+      - Files Processed: ${file_count}
+      - Average File SCS_PCT: ${avg_file_scs_pct}%
+      - File Rejection Rate: ${file_rejection_rate}%
+      - Quality Gap: ${quality_gap}%
+      
+      ### Stuck/Failed ROs
+      - Stuck: ${stuck_count}
+      - Failed: ${failed_count}
+      
+      ### Recommendations
+      ${recommendations}
+changelog: []

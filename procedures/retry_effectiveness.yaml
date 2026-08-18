@@ -1,0 +1,59 @@
+name: retry_effectiveness_analysis
+description: >
+  For RUN_NO > 1, compare first-pass vs retry outcomes to determine if
+  reprocessing is actually improving success rates. Analyzes both file-level
+  (CSV1 RUN_NO comparison) and market-level (CSV2 FIRST_ITER vs NEXT_ITER)
+  retry effectiveness.
+version: 1
+parameters:
+  state:
+    description: "Optional state/market filter (e.g., 'CA', 'NY')"
+    required: false
+    default: null
+steps:
+  - action: market_retry
+    description: "Analyze market-level retry effectiveness from CSV2"
+    tool: analyze_retry_effectiveness
+    params:
+      state: "${state}"
+  - action: compute
+    description: "Calculate key retry metrics"
+    logic: |
+      first_iter_scs_rate = FIRST_ITER_SCS_CNT / (FIRST_ITER_SCS_CNT + FIRST_ITER_FAIL_CNT) * 100
+      post_retry_scs_rate = OVERALL_SCS_CNT / (OVERALL_SCS_CNT + OVERALL_FAIL_CNT) * 100
+      retry_lift = post_retry_scs_rate - first_iter_scs_rate
+      recovered_count = NEXT_ITER_SCS_CNT - FIRST_ITER_SCS_CNT (if positive)
+  - action: interpret
+    description: "Classify retry effectiveness"
+    rules:
+      - condition: "retry_lift > 5"
+        verdict: "✅ High — retries significantly improve outcomes"
+        implication: "Failures are mostly transient/fixable — retry strategy is working"
+      - condition: "retry_lift > 1"
+        verdict: "⚠️ Moderate — retries provide some improvement"
+        implication: "Some failures are recoverable, but many persist"
+      - condition: "retry_lift <= 1"
+        verdict: "🔴 Low — retries are not effective"
+        implication: "Failures are systemic — data quality issues at the source that reprocessing cannot fix"
+  - action: file_level_check
+    description: "Compare RUN_NO=1 vs RUN_NO>1 files from CSV1 to see if individual file retries improve SCS_PCT"
+    tool: query_roster_data
+    params:
+      state: "${state}"
+      run_no: 1
+    compare_with:
+      tool: query_roster_data
+      params:
+        state: "${state}"
+        run_no_gt: 1
+  - action: output
+    description: "Retry effectiveness report with lift analysis"
+    columns:
+      - MONTH
+      - MARKET
+      - FIRST_ITER_SCS_RATE
+      - POST_RETRY_SCS_RATE
+      - RETRY_LIFT_PCT
+      - RECOVERED_BY_RETRY
+      - VERDICT
+changelog: []

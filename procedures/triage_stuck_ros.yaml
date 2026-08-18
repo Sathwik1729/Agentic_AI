@@ -1,0 +1,58 @@
+name: triage_stuck_ros
+description: >
+  Find all stuck ROs (IS_STUCK=1), rank by severity using red health flag count
+  and time-in-stage duration, and recommend escalation priority levels (Critical/High/Medium).
+version: 1
+parameters:
+  state:
+    description: "Optional US state code filter (e.g., 'CA', 'NY')"
+    required: false
+    default: null
+  lob:
+    description: "Optional Line of Business filter (e.g., 'Medicare')"
+    required: false
+    default: null
+steps:
+  - action: filter
+    description: "Find all ROs where IS_STUCK = True"
+    tool: find_stuck_ros
+    params:
+      is_stuck: true
+  - action: compute
+    description: "Count Red health flags per RO across all stage health columns"
+    logic: "red_flag_count = count of columns ending in _HEALTH where value == 'Red'"
+  - action: compute
+    description: "Calculate time stuck by finding the maximum non-avg duration column value"
+    logic: "max_duration = max(PRE_PROCESSING_DURATION, MAPPING_APROVAL_DURATION, ISF_GEN_DURATION, DART_GEN_DURATION, DART_REVIEW_DURATION, DART_UI_VALIDATION_DURATION, SPS_LOAD_DURATION)"
+  - action: rank
+    description: "Sort by severity — most red flags first, then longest stuck duration"
+    sort_by:
+      - column: RED_FLAG_COUNT
+        order: descending
+      - column: MAX_DURATION
+        order: descending
+  - action: classify
+    description: "Assign escalation priority based on severity"
+    rules:
+      - condition: "RED_FLAG_COUNT >= 3 or MAX_DURATION > 1440"
+        priority: Critical
+        label: "🔴 Critical — Immediate escalation required"
+      - condition: "RED_FLAG_COUNT >= 1 or MAX_DURATION > 480"
+        priority: High
+        label: "🟡 High — Escalate within 4 hours"
+      - condition: "default"
+        priority: Medium
+        label: "🟢 Medium — Monitor and follow up"
+  - action: output
+    description: "Return top 10 stuck ROs with escalation priority, stage info, and health flags"
+    limit: 10
+    columns:
+      - RO_ID
+      - ORG_NM
+      - CNT_STATE
+      - LOB
+      - LATEST_STAGE_NM
+      - RED_FLAG_COUNT
+      - MAX_DURATION
+      - ESCALATION_PRIORITY
+changelog: []

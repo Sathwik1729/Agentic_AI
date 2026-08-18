@@ -1,0 +1,71 @@
+name: record_quality_audit
+description: For a given state or org, compute FAIL + REJ + SKIP as % of TOT_REC_CNT.
+version: 2
+parameters:
+  state:
+    description: Optional US state code filter (e.g., 'CA', 'NY')
+    required: false
+    default: null
+  org:
+    description: Optional organization name filter (partial match)
+    required: false
+    default: null
+  threshold:
+    description: SCS_PCT threshold below which files are flagged as low quality
+    required: false
+    default: 80.0
+steps:
+- action: filter
+  description: Get all roster files matching the state/org criteria
+  tool: analyze_record_quality
+  params:
+    state: ${state}
+    org: ${org}
+    threshold: ${threshold}
+- action: compute
+  description: Calculate quality percentages per file
+  logic: 'SUCCESS_PCT = SCS_REC_CNT / TOT_REC_CNT * 100
+
+    FAIL_PCT = FAIL_REC_CNT / TOT_REC_CNT * 100
+
+    REJECT_PCT = REJ_REC_CNT / TOT_REC_CNT * 100
+
+    SKIP_PCT = SKIP_REC_CNT / TOT_REC_CNT * 100
+
+    PROBLEM_PCT = (FAIL_REC_CNT + REJ_REC_CNT) / TOT_REC_CNT * 100
+
+    '
+- action: flag
+  description: Mark files where SCS_PCT < threshold as IS_LOW_QUALITY
+  condition: SCS_PCT < ${threshold}
+- action: analyze
+  description: Identify whether problems are mostly failures (system) or rejections
+    (data quality)
+  logic: "If FAIL_PCT > REJECT_PCT \u2192 \"Processing pipeline issues \u2014 investigate\
+    \ system errors\"\nIf REJECT_PCT > FAIL_PCT \u2192 \"Source data quality issues\
+    \ \u2014 work with provider org\"\nIf both are high \u2192 \"Combined system and\
+    \ data quality problems\"\n"
+- action: output
+  description: Return quality breakdown sorted by worst quality first
+  sort_by:
+  - column: PROBLEM_PCT
+    order: descending
+  columns:
+  - RO_ID
+  - ORG_NM
+  - CNT_STATE
+  - LOB
+  - SRC_SYS
+  - TOT_REC_CNT
+  - SUCCESS_PCT
+  - FAIL_PCT
+  - REJECT_PCT
+  - SKIP_PCT
+  - PROBLEM_PCT
+  - IS_LOW_QUALITY
+changelog:
+- version: 2
+  timestamp: '2026-03-13T12:54:42.065458'
+  change: Added SKIP_REC_CNT to quality calculation per user feedback
+  updates:
+    description: For a given state or org, compute FAIL + REJ + SKIP as % of TOT_REC_CNT.
