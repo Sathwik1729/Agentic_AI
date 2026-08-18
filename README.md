@@ -6,7 +6,7 @@ An autonomous AI agent that diagnoses pipeline issues, derives quality metrics o
 
 ## Quick Start
 
-```bash
+```bash  --
 # 1. Clone
 git clone https://github.com/Sathwik1729/Agentic_AI.git
 cd Agentic_AI
